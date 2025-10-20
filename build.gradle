@@ -32,7 +32,9 @@ String timestamp = formatter.format(now)
 
 tasks.register("exportContainerData") {
 	doFirst {
-		String hostPath = projectDir.relativePath(file("exported_data/data_${config.namespace}_${timestamp}"))
+		File exportDir = file("exported_data/data_${config.namespace}_${timestamp}")
+
+		String hostPath = projectDir.relativePath(exportDir)
 
 		getExistingVolumeNames().each {
 			String volumeName ->
@@ -44,8 +46,7 @@ tasks.register("exportContainerData") {
 			}
 
 			println "Creating backup of volume ${volumeName} in ${hostPath}/${backupFileName}"
-			waitForCommand("docker run --rm -v ${volumeName}:/source -v ${hostPath}:/target busybox:latest tar --create --file=/target/${backupFileName} --directory=/source .")
-			println "Created backup of volume ${volumeName} in ${hostPath}/${backupFileName}"
+			waitForCommand("docker run --rm -v ${volumeName}:/source -v ${exportDir.absolutePath}:/target busybox:latest tar --create --file=/target/${backupFileName} --directory=/source .")
 		}
 
 		updateGradleLocalProperties(["lr.docker.environment.data.directory" : hostPath])
@@ -95,8 +96,6 @@ tasks.register("importContainerData") {
 				waitForCommand("docker run --rm -v ${volumeName}:/target -v ${backupFile.absolutePath}:/source busybox:latest sh -c 'cp --update --recursive /source/* /target/'")
 			}
 
-			println "Restored backup of volume ${volumeName} using ${backupFile.absolutePath}"
-
 			println waitForCommand("docker run --rm -v ${volumeName}:/${volumeName} busybox:latest du -sh /${volumeName}/")
 		}
 	}
@@ -127,7 +126,12 @@ tasks.register("shareWorkspace") {
 		String fileListFileName = "shared_workspaces/workspace_${config.namespace}_${timestamp}.txt"
 		String archiveFileName = "shared_workspaces/workspace_${config.namespace}_${timestamp}.7z"
 
-		file(fileListFileName).text = fileTree('.') {
+		File fileListFile = file(fileListFileName)
+
+		fileListFile.parentFile.mkdirs()
+		// fileListFile.createNewFile()
+
+		fileTree('.') {
 			exclude ".gitkeep"
 			exclude ".gitignore"
 			exclude ".git"
@@ -146,17 +150,18 @@ tasks.register("shareWorkspace") {
 
 			include "${config.dataDirectory}/**"
 			include "**/*"
-		}.files.collect {
+		}.files.each {
 			File file ->
 
-			project.relativePath(file)
-		}.join("\n")
+			fileListFile.append("${project.relativePath(file)}\n")
+		}
 
 		try {
+			println fileListFile.text
 			waitForCommand("7z a -m0=lzma2 -mx=1 -bsp2 ${archiveFileName} -i@${fileListFileName}")
 		}
 		finally {
-			file(fileListFileName).delete()
+			fileListFile.delete()
 		}
 	}
 }
