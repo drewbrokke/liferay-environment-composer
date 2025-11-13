@@ -236,14 +236,35 @@ _getProjectRoot() {
 	return 1
 }
 
-CWD_PROJECT_ROOT="$(_getProjectRoot)"
+_resolveProjectRoot() {
+	local project_identifier="${1}"
+	local project_root_path
+
+	if [[ -n "${project_identifier}" ]]; then
+		if [[ -d "${project_identifier}" && -d "${project_identifier}/compose-recipes" ]]; then
+			echo "${project_identifier}"
+			return 0
+		fi
+
+		project_root_path="$(_getWorktreeDir "${project_identifier}")"
+
+		if [[ -n "${project_root_path}" && -d "${project_root_path}/compose-recipes" ]]; then
+			echo "${project_root_path}"
+			return 0
+		fi
+	fi
+
+	_getProjectRoot
+}
 
 #
 # Check to see if the script is called from a Composer project
 #
 
-_checkCWDProject() {
-	if [[ ! -d "${CWD_PROJECT_ROOT}" ]]; then
+_checkProjectRoot() {
+	local project_root_path="${1}"
+
+	if [[ ! -d "${project_root_path}" || ! -d "${project_root_path}/compose-recipes" ]]; then
 		_errorExit "Not inside of a Liferay Environment Composer project"
 	fi
 }
@@ -347,22 +368,25 @@ _verifyListableEntity() {
 #
 
 _getComposeProjectName() {
-	_checkCWDProject
+	local project_root_path="${1}"
 
-	echo "${CWD_PROJECT_ROOT##*/}" | tr "[:upper:]" "[:lower:]"
+	echo "${project_root_path##*/}" | tr "[:upper:]" "[:lower:]"
 }
 _getServicePorts() {
-	_checkCWDProject
-
-	local serviceName="${1}"
+	local project_root_path="${1}"
+	local serviceName="${2}"
 	# shellcheck disable=SC2016
 	local template='table NAME\tCONTAINER PORT\tHOST PORT\n{{$name := .Name}}{{range .Publishers}}{{if eq .URL "0.0.0.0"}}{{$name}}\t{{.TargetPort}}\tlocalhost:{{.PublishedPort}}\n{{end}}{{end}}'
 
-	if [[ "${serviceName}" ]]; then
-		docker compose ps "${serviceName}" --format "${template}" | tail -n +3
-	else
-		docker compose ps --format "${template}" | tail -n +3
-	fi
+	(
+		cd "${project_root_path}" || exit 1
+
+		if [[ "${serviceName}" ]]; then
+			docker compose ps "${serviceName}" --format "${template}" | tail -n +3
+		else
+			docker compose ps --format "${template}" | tail -n +3
+		fi
+	)
 }
 _getWorktreeDir() {
 	local worktree_name="${1}"
@@ -525,10 +549,14 @@ _cmd_fn() {
 	"${1}" "${@:2}"
 }
 _cmd_gw() {
-	_checkCWDProject
+	local project_identifier="${1}"
+	shift
+
+	local project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
 		./gradlew "${@}"
 	)
@@ -568,13 +596,16 @@ _cmd_ports() {
 }
 _cmd_setVersion() {
 	local liferay_version
+	local project_identifier="${1}"
 
-	_checkCWDProject
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	liferay_version="$(_selectLiferayRelease)"
 	_cancelIfEmpty "${liferay_version}"
 
-	_writeLiferayVersion "${CWD_PROJECT_ROOT}" "${liferay_version}"
+	_writeLiferayVersion "${project_root_path}" "${liferay_version}"
 }
 
 #
@@ -582,13 +613,17 @@ _cmd_setVersion() {
 #
 
 cmd_clean() {
-	_checkCWDProject
+	local project_identifier="${1}"
+
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
 		local docker_images
-		docker_images="$(docker image ls | grep "^$(_getComposeProjectName)" | awk '{print $1}')"
+		docker_images="$(docker image ls | grep "^$(_getComposeProjectName "${project_root_path}")" | awk '{print $1}')"
 
 		if [[ "${docker_images}" ]]; then
 			_print_warn "This will stop the Docker compose project, remove the Docker volumes, and remove the following Docker images:"
@@ -614,19 +649,23 @@ cmd_clean() {
 
 		if [[ "${docker_images}" ]]; then
 			_print_step "Removing Docker images..."
-			docker image ls | grep "^$(_getComposeProjectName)" | awk '{print $3}' | xargs -I{} docker image rm {}
+			docker image ls | grep "^$(_getComposeProjectName "${project_root_path}")" | awk '{print $3}' | xargs -I{} docker image rm {}
 		fi
 
 		_print_success "Done"
 	)
 }
 cmd_exportData() {
-	_checkCWDProject
+	local project_identifier="${1}"
+
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	_print_step "Exporting container data..."
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
 		if ! ./gradlew exportContainerData --quiet; then
 			exit 1
@@ -635,14 +674,18 @@ cmd_exportData() {
 		local exportedDataRelativeDir
 		exportedDataRelativeDir=$(grep lr.docker.environment.data.directory gradle-local.properties | sed "s,.*=,,g")
 
-		_print_success "Container data exported to ${CWD_PROJECT_ROOT}/${exportedDataRelativeDir}"
+		_print_success "Container data exported to ${project_root_path}/${exportedDataRelativeDir}"
 	)
 }
 cmd_importDLStructure() {
-	_checkCWDProject
-
 	local sourceDir="${1}"
-	local targetDir="${CWD_PROJECT_ROOT}/configs/common/data/document_library"
+	local project_identifier="${2}"
+
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
+
+	local targetDir="${project_root_path}/configs/common/data/document_library"
 
 	if [[ ! -d "${sourceDir}" ]]; then
 		_print_error "Need a source directory to copy from"
@@ -657,7 +700,7 @@ cmd_importDLStructure() {
 	_print_step "Copying file structure from ${sourceDir}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
 		if ! ./gradlew importDocumentLibraryStructure -PsourceDir="${sourceDir}" --console=plain --quiet --stacktrace; then
 			return 1
@@ -740,54 +783,65 @@ cmd_remove() {
 }
 cmd_share() {
 	local exportFlag="${1}"
+	local project_identifier="${2}"
 
-	_checkCWDProject
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
 		if [[ "${exportFlag}" == "--export" ]]; then
 			_print_step "Exporting container data..."
 
-			if ! ./gradlew exportContainerData --quiet; then
+			if ! "./gradlew" exportContainerData --quiet; then
 				exit 1
 			fi
 		fi
 
 		_print_step "Zipping up workspace..."
 
-		if ! ./gradlew shareWorkspace | grep -E "Workspace zip|workspace archive"; then
+		if ! "./gradlew" shareWorkspace | grep -E "Workspace zip|workspace archive"; then
 			exit 1
-		fi
+			fi
 
 		_print_success "Workspace saved"
 	)
 }
 cmd_start() {
-	_checkCWDProject
+	local project_identifier="${1}"
+
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
-		_print_step "Starting environment"
+		_print_step "Starting environment ${C_BLUE}${project_root_path}${C_NC}"
 		if ! ./gradlew start; then
 			exit 1
 		fi
 
 		_print_step "Printing published ports"
-		_getServicePorts
+		_getServicePorts "${project_root_path}"
 
 		_print_step "Tailing logs"
 		docker compose logs -f
 	)
 }
 cmd_stop() {
-	_checkCWDProject
+	local project_identifier="${1}"
+
+	local project_root_path
+	project_root_path="$(_resolveProjectRoot "${project_identifier}")"
+	_checkProjectRoot "${project_root_path}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${project_root_path}" || exit
 
-		_print_step "Stopping environment"
+		_print_step "Stopping environment ${C_BLUE}${project_root_path}${C_NC}"
 		./gradlew stop
 	)
 }
