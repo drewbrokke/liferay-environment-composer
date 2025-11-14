@@ -556,10 +556,10 @@ _cmd_fn() {
 	"${1}" "${@:2}"
 }
 _cmd_gw() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		./gradlew "${@}"
 	)
@@ -593,19 +593,21 @@ _cmd_list() {
 	_list_"${entity}"
 }
 _cmd_ports() {
+	_checkProjectDirectory
+
 	local serviceName="${1}"
 
-	_getServicePorts "${serviceName}"
+	_getServicePorts "${PROJECT_DIRECTORY}" "${serviceName}"
 }
 _cmd_setVersion() {
-	local liferay_version
+	_checkProjectDirectory
 
-	_checkCWDProject
+	local liferay_version
 
 	liferay_version="$(_selectLiferayRelease)"
 	_cancelIfEmpty "${liferay_version}"
 
-	_writeLiferayVersion "${CWD_PROJECT_ROOT}" "${liferay_version}"
+	_writeLiferayVersion "${PROJECT_DIRECTORY}" "${liferay_version}"
 }
 
 #
@@ -613,13 +615,13 @@ _cmd_setVersion() {
 #
 
 cmd_clean() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		local docker_images
-		docker_images="$(docker image ls | grep "^$(_getComposeProjectName)" | awk '{print $1}')"
+		docker_images="$(docker image ls | grep "^$(_getComposeProjectName "${PROJECT_DIRECTORY}")" | awk '{print $1}')"
 
 		if [[ "${docker_images}" ]]; then
 			_print_warn "This will stop the Docker compose project, remove the Docker volumes, and remove the following Docker images:"
@@ -645,19 +647,19 @@ cmd_clean() {
 
 		if [[ "${docker_images}" ]]; then
 			_print_step "Removing Docker images..."
-			docker image ls | grep "^$(_getComposeProjectName)" | awk '{print $3}' | xargs -I{} docker image rm {}
+			docker image ls | grep "^$(_getComposeProjectName "${PROJECT_DIRECTORY}")" | awk '{print $3}' | xargs -I{} docker image rm {}
 		fi
 
 		_print_success "Done"
 	)
 }
 cmd_exportData() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	_print_step "Exporting container data..."
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		if ! ./gradlew exportContainerData --quiet; then
 			exit 1
@@ -666,14 +668,14 @@ cmd_exportData() {
 		local exportedDataRelativeDir
 		exportedDataRelativeDir=$(grep lr.docker.environment.data.directory gradle-local.properties | sed "s,.*=,,g")
 
-		_print_success "Container data exported to ${CWD_PROJECT_ROOT}/${exportedDataRelativeDir}"
+		_print_success "Container data exported to ${PROJECT_DIRECTORY}/${exportedDataRelativeDir}"
 	)
 }
 cmd_importDLStructure() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	local sourceDir="${1}"
-	local targetDir="${CWD_PROJECT_ROOT}/configs/common/data/document_library"
+	local targetDir="${PROJECT_DIRECTORY}/configs/common/data/document_library"
 
 	if [[ ! -d "${sourceDir}" ]]; then
 		_print_error "Need a source directory to copy from"
@@ -688,7 +690,7 @@ cmd_importDLStructure() {
 	_print_step "Copying file structure from ${sourceDir}"
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		if ! ./gradlew importDocumentLibraryStructure -PsourceDir="${sourceDir}" --console=plain --quiet --stacktrace; then
 			return 1
@@ -770,12 +772,12 @@ cmd_remove() {
 	done
 }
 cmd_share() {
+	_checkProjectDirectory
+
 	local exportFlag="${1}"
 
-	_checkCWDProject
-
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		if [[ "${exportFlag}" == "--export" ]]; then
 			_print_step "Exporting container data..."
@@ -795,10 +797,10 @@ cmd_share() {
 	)
 }
 cmd_start() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
 		_print_step "Starting environment"
 		if ! ./gradlew start; then
@@ -813,12 +815,12 @@ cmd_start() {
 	)
 }
 cmd_stop() {
-	_checkCWDProject
+	_checkProjectDirectory
 
 	(
-		cd "${CWD_PROJECT_ROOT}" || exit
+		cd "${PROJECT_DIRECTORY}" || exit
 
-		_print_step "Stopping environment"
+		_print_step "Stopping environment ${C_BLUE}${PROJECT_DIRECTORY}${C_NC}"
 		./gradlew stop
 	)
 }
