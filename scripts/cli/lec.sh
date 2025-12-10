@@ -417,7 +417,12 @@ _verifyListableEntity() {
 _getComposeProjectName() {
 	local projectDir="${1}"
 
-	echo "${projectDir##*/}" | tr "[:upper:]" "[:lower:]"
+	(
+		cd "${projectDir}" || exit 1
+
+		echo "${PWD##*/}" | tr "[:upper:]" "[:lower:]"
+	)
+
 }
 _getServicePorts() {
 	local projectDir="${1}"
@@ -458,11 +463,14 @@ _removeWorktree() {
 	local worktree_name="${worktree##*/}"
 
 	if [[ -d "${worktree}" ]]; then
-		_print_step "Shutting down project and removing Docker volumes..."
+		_print_step "Shutting down project and removing Docker volumes and images..."
 		(
 			cd "${worktree}" || exit 1
 
 			./gradlew stop -Plr.docker.environment.clear.volume.data=true
+
+			_print_step "Removing Docker images..."
+			_removeDockerImages "${worktree}"
 		)
 	fi
 
@@ -654,6 +662,16 @@ _cmd_setVersion() {
 # PUBLIC COMMAND DEFINITIONS
 #
 
+_getDockerImages() {
+	local projectDir=${1:?Project dir required}
+
+	docker image ls | grep "^$(_getComposeProjectName "${projectDir}")" | awk '{print $1}'
+}
+_removeDockerImages() {
+	local projectDir=${1:?Project dir required}
+
+	docker image ls | grep "^$(_getComposeProjectName "${projectDir}")" | awk '{print $3}' | xargs -I{} docker image rm {}
+}
 cmd_clean() {
 	_checkProjectDirectory
 
@@ -661,7 +679,7 @@ cmd_clean() {
 		cd "${PROJECT_DIRECTORY}" || exit
 
 		local docker_images
-		docker_images="$(docker image ls | grep "^$(_getComposeProjectName "${PROJECT_DIRECTORY}")" | awk '{print $1}')"
+		docker_images="$(_getDockerImages "${PROJECT_DIRECTORY}")"
 
 		if [[ "${docker_images}" ]]; then
 			_print_warn "This will stop the Docker compose project, remove the Docker volumes, and remove the following Docker images:"
@@ -687,7 +705,7 @@ cmd_clean() {
 
 		if [[ "${docker_images}" ]]; then
 			_print_step "Removing Docker images..."
-			docker image ls | grep "^$(_getComposeProjectName "${PROJECT_DIRECTORY}")" | awk '{print $3}' | xargs -I{} docker image rm {}
+			_removeDockerImages "${PROJECT_DIRECTORY}"
 		fi
 
 		_print_success "Done"
@@ -799,7 +817,19 @@ cmd_remove() {
 	worktrees="$(_listWorktrees | grep -E -v "^${LIFERAY_ENVIRONMENT_COMPOSER_HOME}$" | _selectMultiple "Choose projects to remove (Tab to select multiple)")"
 	_cancelIfEmpty "${worktrees}"
 
+	local docker_images=()
+	while read -r worktree; do
+		docker_images+=("$(_getDockerImages "${worktree}")")
+	done < <(printf "%s\n" "${worktrees}")
+
+	docker_images=("$(printf "%s\n" "${docker_images[@]}" | sed '/^$/d')")
+	# echo "${docker_images[@]}"
+
+	# return
+
 	printf "${C_BOLD}Projects to be removed:\n\n${C_YELLOW}%s${C_RESET}\n\n" "${worktrees}"
+
+	printf "${C_BOLD}Docker images to be removed:\n\n${C_YELLOW}%s${C_RESET}\n\n" "${docker_images[@]}"
 
 	if ! _confirm "Are you sure you want to remove them? This cannot be undone."; then
 		return 1
