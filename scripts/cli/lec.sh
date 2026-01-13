@@ -838,9 +838,25 @@ cmd_list() {
 	_list_"${entity}"
 }
 cmd_remove() {
+	local projectLocator="${1}"
+	local worktree
 	local worktrees
-	worktrees="$(_listWorktrees | grep -E -v "^${LIFERAY_ENVIRONMENT_COMPOSER_HOME}$" | _selectMultiple "Choose projects to remove (Tab to select multiple)")"
-	_cancelIfEmpty "${worktrees}"
+
+	if [[ ${projectLocator} ]]; then
+		worktree="$(_getProjectDir "${projectLocator}")"
+
+		if [[ -z "${worktree}" ]]; then
+			_errorExit "Could not find a project to remove with id: ${projectLocator}"
+		fi
+	fi
+
+
+	if [[ "${worktree}" ]]; then
+		worktrees="${worktree}"
+	else
+		worktrees="$(_listWorktrees | grep -E -v "^${LIFERAY_ENVIRONMENT_COMPOSER_HOME}$" | _selectMultiple "Choose projects to remove (Tab to select multiple)")"
+		_cancelIfEmpty "${worktrees}"
+	fi
 
 	printf "${C_BOLD}Projects to be removed:\n\n${C_YELLOW}%s${C_RESET}\n\n" "${worktrees}"
 
