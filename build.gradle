@@ -18,6 +18,31 @@ if (Boolean.getBoolean("env.mode.ci")) {
 	}
 }
 
+tasks.register("shfmt", Exec) {
+	description = 'Formats shell scripts using shfmt in a Docker container.'
+	group = 'Verification'
+	doFirst {
+		println 'Running shfmt on shell scripts...'
+	}
+	// 'docker', 'run', '--rm', '-u', '"$(id -u):$(id -g)"', '-v', '"$PWD:/mnt"', 'mvdan/shfmt:latest', '-w', '/mnt/scripts/cli'
+	// commandLine 'docker', 'run', '--rm', '-v', "${project.rootDir}/scripts/cli:/mnt", 'mvdan/shfmt:latest', '-w', '/mnt/*'
+	commandLine 'docker', 'run', '--rm', '-v', "${project.rootDir}:/mnt", 'mvdan/shfmt:latest-alpine', '-w', '/mnt/scripts/cli'
+}
+
+tasks.register("shellcheck", Exec) {
+	description = 'Lints shell scripts using shellcheck in a Docker container.'
+	group = 'Verification'
+	doFirst {
+		println 'Running shellcheck on shell scripts...'
+	}
+	commandLine 'docker', 'run', '--rm', '-v', "${project.rootDir}/scripts/cli:/mnt", 'koalaman/shellcheck:stable', '/mnt/lec.sh'
+	commandLine 'docker', 'run', '--rm', '-v', "${project.rootDir}/scripts/cli:/mnt", 'koalaman/shellcheck:stable', '/mnt/shell-source.sh'
+}
+
+tasks.named('formatSource') {
+	dependsOn 'shfmt', 'shellcheck'
+}
+
 gradle.liferayWorkspace {
 	dockerImageId = config.liferayDockerImageId
 }
